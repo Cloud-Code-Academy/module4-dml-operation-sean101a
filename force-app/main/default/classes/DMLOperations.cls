@@ -265,46 +265,69 @@ public with sharing class DMLOperations {
      * @param contactsToUpsert List of Contacts to be upserted and linked to accounts.
      */
     public static void upsertAccountsWithContacts(List<Contact> contactsToUpsert) {
-        Map<String, Account> accountMap = new Map<String, Account>();
-        // Loop through each Contact
+        // Step 1: Collect all unique account names from the contacts
+        Set<String> accountNames = new Set<String>();
         for (Contact c : contactsToUpsert) {
-            String accountName = c.LastName;
-        // Extract the Account Name from Contact's LastName
-        if (!accountMap.containsKey(accountName)) {
-        // Get the account based on the name or create one if it doesn't exist
-        List<Account> accounts = [SELECT Id, Name FROM Account WHERE Name = :accountName LIMIT 1];
-            if (!accounts.isEmpty()) {
-                accountMap.put(accountName, accounts[0]);
-            } else {   
+            accountNames.add(c.LastName);
+        }
+    
+        // Step 2: Query all existing Accounts with those names
+        Map<String, Account> accountMap = new Map<String, Account>();
+        for (Account acc : [SELECT Id, Name FROM Account WHERE Name IN :accountNames]) {
+            accountMap.put(acc.Name, acc);
+        }
+    
+        // Step 3: Create new Accounts for names that don't exist
+        List<Account> accountsToInsert = new List<Account>();
+        for (String accountName : accountNames) {
+            if (!accountMap.containsKey(accountName)) {
                 Account newAccount = new Account(Name = accountName);
-                upsert newAccount; // Use the upsert method to insert the new Account
-                accountMap.put(accountName, newAccount);
-            }    
-        // Link the Contact to its Account using the Account Id
-        c.AccountId = accountMap.get(accountName).Id;
-        }  
+                accountsToInsert.add(newAccount);
+            }
+        }
+    
+        // Insert new accounts and update the accountMap
+        if (!accountsToInsert.isEmpty()) {
+            upsert accountsToInsert;
+            for (Account acc : accountsToInsert) {
+                accountMap.put(acc.Name, acc); // Add newly inserted accounts to the map
+            }
+        }
+    
+        // Step 4: Assign the AccountId to each contact and upsert the contacts
+        for (Contact c : contactsToUpsert) {
+            c.AccountId = accountMap.get(c.LastName).Id;
+        }
+    
         // Upsert the Contacts
         upsert contactsToUpsert;
-        }
-}
-
+    }
     /**
      * Question 11
      * Insert a list of Leads and then deletes them.
      * @param leadNames The list of Lead names to be inserted.
      */
     public static void insertAndDeleteLeads(List<String> leadNames) {
-        // Loop through each Lead name
+        List<Lead> leadsToInsert = new List<Lead>();
+        List<Lead> leadsToDelete = new List<Lead>();
+        
+        // Loop through Leads
         for (String leadName : leadNames) {
-        // Insert the Leads
-            Lead newLead = new Lead (LastName = LeadName, Company = 'ABC Corp');
-            insert newLead;
-        // Delete the Leads
-            delete [SELECT Id FROM Lead WHERE LastName = :leadName];
+            // Prepare the Leads to insert
+            Lead newLead = new Lead(LastName = leadName, Company = 'ABC Corp');
+            leadsToInsert.add(newLead);
         }
+        
+        // Insert the Leads
+        insert leadsToInsert;
+        
+        // Query for the inserted Leads to delete
+        leadsToDelete = [SELECT Id FROM Lead WHERE LastName IN :leadNames];
+        
+        // Delete all Leads
+        delete leadsToDelete;
     }
-
-
+    
     /**
      * Question 12
      * Dynamically create the number of cases and relate it to the accountId, then deletes them.
